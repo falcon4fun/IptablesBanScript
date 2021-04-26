@@ -229,6 +229,7 @@ There is a second rule to reject all other protocols from attacker like udp, icm
 `ipset -exist restore < /opt/root/customFW/ipset.list` this is for restoring IPSet SETs from ipset.list after reboot.  
 Moreover, I use "On shutdown" command: `ipset save > /opt/root/customFW/ipset.list` to survive after reboot. You can add this script to cron too if you like to hard-reset your device without graceful shutdown
 And "Firewall" command: `sh -x /opt/root/customFW/customFW.sh &> /opt/root/customFW/log.txt` to log the execution of the whole script  
+
 In addition, You need to change default values of xt_recent module parameters! They are too low by default on Tomato firmware  
 `ip_list_tot` - Number of addresses remembered per table. I've set to 3000 IPs  
 `ip_pkt_list_tot` - Number of packets per address remembered. I've set to 250 packets (timestamps) per IP
