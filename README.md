@@ -16,11 +16,16 @@ Moreover, Brute force rate from one IP can be 20 hits per 2 hours because of man
 2. IPset (tested on v6.38)
 3. Loaded modules: ip_set, xt_set, ip_set_hash_ip
 4. xt_recent (or maybe ipt_recent) working
-5. Some understanding how iptables works at all (I will try to give some theory in ELI5 method below)
+5. change xt_recent module parameters `ip_list_tot` and `ip_pkt_list_tot`
+6. Some understanding how iptables works at all (I will try to give some theory in ELI5 method below)
 
 You can check modules:
 1) if they exist on your FW by running `modprobe -l | grep "ip_\|xt_set" | sort`
 2) if they are already loaded `lsmod | grep "ip_\|xt_set" | sort`
+
+You can check xt_recent parameters:
+1) `cat /sys/module/xt_recent/parameters/ip_list_tot`
+2) `cat /sys/module/xt_recent/parameters/ip_pkt_list_tot`
 
 Some theory (scroll down if you understand):  
 Let's imagine we have a router in this case with NAT. Iptables has 3 main chains: input, forward and output.
@@ -208,4 +213,52 @@ done
 
 #Loading SETs from saved ones
 ipset -exist restore < /opt/root/customFW/ipset.list
+```
+
+### Explanation of command line parameters:  
+`-w 5` is used to Wait for the xtables lock.  To prevent multiple instances of the program from running concurrently, an attempt will be made to obtain an exclusive lock at launch.  By default, the program will exit if the lock cannot be obtained.  This option will make the program wait (indefinitely or for optional seconds) until the exclusive lock can be obtained.  
+We need a exclusive lock to correctly insert all of those rules. I've found some of them can be NOT inserted/appended correctly and this parameter solve this problem by locking table before adding rule and unlocking it after it. 5s is maximum time to wait.  
+`-m conntrack --ctstate NEW` use connection tracker module to match only NEW connections  
+`--rcheck` checks if the source address of the packet is currently in the list.  
+`-m recent --name <setname>` uses xt_recent module table to track IPs.  
+`-j` specifies the target of the rule; i.e., what to do if the packet matches it.  
+`-m set --match-set <setname>` uses IPSet module to match only IPs from IPSet SET <setname>  
+`-p tcp` match only TCP protocol  
+`-j REJECT --reject-with tcp-reset` you can use DROP instead. I prefer rejecting.
+There is a second rule to reject all other protocols from attacker like udp, icmp and other.  
+`ipset -exist restore < /opt/root/customFW/ipset.list` this is for restoring IPSet SETs from ipset.list after reboot.  
+Moreover, I use "On shutdown" command: `ipset save > /opt/root/customFW/ipset.list` to survive after reboot. You can add this script to cron too if you like to hard-reset your device without graceful shutdown
+And "Firewall" command: `sh -x /opt/root/customFW/customFW.sh &> /opt/root/customFW/log.txt` to log the execution of the whole script  
+In addition, You need to change default values of xt_recent module parameters! They are too low by default on Tomato firmware  
+`ip_list_tot` - Number of addresses remembered per table. I've set to 3000 IPs
+`ip_pkt_list_tot` - Number of packets per address remembered. I've set to 250 packets (timestamps) per IP
+
+### To conclude, My Tomato script tab looks like:  
+Init tab:   
+```
+chmod 644 /sys/module/xt_recent/parameters/ip_list_tot
+echo 3000 > /sys/module/xt_recent/parameters/ip_list_tot
+chmod 400 /sys/module/xt_recent/parameters/ip_list_tot
+
+chmod 644 /sys/module/xt_recent/parameters/ip_pkt_list_tot
+echo 250 > /sys/module/xt_recent/parameters/ip_pkt_list_tot
+chmod 400 /sys/module/xt_recent/parameters/ip_pkt_list_tot
+```   
+Shutdown tab:
+```
+ipset save > /opt/root/customFW/ipset.list
+```
+Firewall tab:
+```
+sh -x /opt/root/customFW/customFW.sh &> /opt/root/customFW/log.txt
+```
+WanUP tab:
+```
+chmod 644 /sys/module/xt_recent/parameters/ip_list_tot
+echo 3000 > /sys/module/xt_recent/parameters/ip_list_tot
+chmod 400 /sys/module/xt_recent/parameters/ip_list_tot
+
+chmod 644 /sys/module/xt_recent/parameters/ip_pkt_list_tot
+echo 250 > /sys/module/xt_recent/parameters/ip_pkt_list_tot
+chmod 400 /sys/module/xt_recent/parameters/ip_pkt_list_tot
 ```
