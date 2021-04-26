@@ -4,12 +4,12 @@
 ### Annoyed by specific port scanners?
 ### Annoyed by bots which floods with connections to specific services?
 
-You can try my this project. 
+You can try my this project.  
 
-This was written on FreshTomato 2021.2 working on Netgear R6400. Those rules WILL need some modifications on other router firmwares or distributive because some rules are inserted on specified position.
-Previously I've used only recent module and found it ineffective. Some IPs come again after temp ban after few hours/days.
-The better way is to use IPSet sets to ban IPs completely. IPSet cause very small resource overhead minimizing count of iptables ban rules.
-Moreover, Brute force rate from one IP can be 20 hits per 2 hours because of many proxies/IPs available
+This was written on FreshTomato 2021.2 working on Netgear R6400. Those rules WILL need some modifications on other router firmwares or distributive because some rules are inserted on specified position.  
+Previously I've used only recent module and found it ineffective. Some IPs come again after temp ban after few hours/days.  
+The better way is to use IPSet sets to ban IPs completely. IPSet cause very small resource overhead minimizing count of iptables ban rules.  
+Moreover, Brute force rate from one IP can be 20 hits per 2 hours because of many proxies/IPs available  
 
 ### Prerequisites:
 1. Iptables (tested on v1.8.7)
@@ -22,14 +22,14 @@ You can check modules:
 1) if they exist on your FW by running `modprobe -l | grep "ip_\|xt_set" | sort`
 2) if they are already loaded `lsmod | grep "ip_\|xt_set" | sort`
 
-Some theory (scroll down if you understand):
+Some theory (scroll down if you understand):  
 Let's imagine we have a router in this case with NAT. Iptables has 3 main chains: input, forward and output.
 1. If the external client sends the packet to router, the packet goes in Input chain
 2. If the external client sends a packet to somewhere inside NAT (machine behind the router), the packet hits in the Forward chain. Forward chain works with input and output packets of NATted clients
 3. If our computer behind router sends a packet, the packet hits Output chain
-Quite an easy? So, we need to work with Input and Forward chains for this task.
 
-Tomato firmware have some rules by default with some my open ports. As an example:
+Quite an easy? So, we need to work with Input and Forward chains for this task.  
+Tomato firmware have some rules by default with some open ports
 ```
 iptables -L -n -v --line-numbers
 Chain INPUT (policy DROP 64 packets, 4258 bytes)
@@ -91,14 +91,17 @@ Chain wanout (1 references)
 num   pkts bytes target     prot opt in     out     source               destination
 ```
 
-Every packet is checked step by step from num #1 to num #XX of corresponding chain. 
-If the packet matches any rule, it does its "Target".
-If the target is another chain, it steps in that chain and go step by step from num #1 to num #xx and exists if there is no accept, drop, reject target. Those "targets" does action and forgets about the packet.
+br0 - our LAN VLAN (192.168.0.x)  
+tun* - our VPN VLAN (10.0.0.x)  
+vlan2 - our WAN VLAN (i.e. 123.123.123.123)  
 
+Every packet is checked step by step from num #1 to num #XX of corresponding chain.  
+If the packet matches any rule, it does its "Target".  
+If the target is another chain, it steps in that chain and go step by step from num #1 to num #xx and exists if there is no accept, drop, reject target. Those "targets" does action and forgets about the packet.  
 
-We need to create some new filtering chains and redirect from Input and Forward chains to them. 
-They should be after 6 line in Input chain and before Forward 5 line or inside Wanin chain because we have a rule for inbound forwarded traffic.
-We don't want to filter outbound traffic so let's filter inside Wanin chain. Alternatively you can modify my rules with "-i" parameter with interface name to filter from wan->lan
+We need to create some new filtering chains and redirect from Input and Forward chains to them.  
+They should be after 6 line in Input chain and before Forward 5 line or inside Wanin chain because we have a rule for inbound forwarded traffic.  
+We don't want to filter outbound traffic so let's filter inside Wanin chain. Alternatively you can modify my rules with "-i" parameter with interface name to filter from wan->lan  
 
 We have:
 1. Globally opened ssh on 22 TCP port on our router (i.e. we need to access our router from somewhere)
@@ -108,7 +111,7 @@ We have:
 
 In my opinion, the router can and should work on it.
 Main logic of my rules:
-1. Create IPSet some tables (Will call them SETs to not confuse with Iptables TABLES) with timeouts where to store timed, global and flood ban.
+1. Create IPSet some tables (Will call them SETs to not confuse with IPtables TABLES) with timeouts where to store timed, global and flood ban.  
 In current example we need SSHPorts, RDPPorts, GlobalBan, FloodBan to be created.
 2. We will check if IP is inside IPSet SET. If true, we reject connection with tcp-reset
 3. We need to create some chains where to jump in. Let them be with the same name: SSHPorts, RDPPorts, GlobalBan, FloodBan
@@ -121,15 +124,15 @@ In current example we need SSHPorts, RDPPorts, GlobalBan, FloodBan to be created
 10. If this IP is banned, Reject this connection
 11. If 7-10 are false, we step out from FloodBan chain to our RDPPorts chain
 12. RDPPorts chain add every IP to xt_recent list called "RDPRecent" with timestamp and counter
-13. Next it checks if there was more than 5 NEW connections in the last 60 seconds. If true, add IP to RDPPorts SET.
-Why should IP create NEW connections 5 times per minute? Maybe because Windows disconnected it?
-RDPPorts SET is a timeout one. It has 300s timeout (or any other value). IP will be removed from that SET after timeout.
+13. Next it checks if there was more than 5 NEW connections in the last 60 seconds. If true, add IP to RDPPorts SET.  
+Why should IP create NEW connections 5 times per minute? Maybe because Windows disconnected it?  
+RDPPorts SET is a timeout one. It has 300s timeout (or any other value). IP will be removed from that SET after timeout.  
 So we ban IP for 300s. But RECENT module (12 paragraph) will still count temporary banned IP and log timestamps and increment counter. Brute force software likes reconnecting many and many times. Any real person will not do that after service unavailable if he knows how his time lock works.
-14. Another rule: if there was more than 10 NEW connections in the last 7200 seconds (2 hours), add IP to GlobalBan SET.
+14. Another rule: if there was more than 10 NEW connections in the last 7200 seconds (2 hours), add IP to GlobalBan SET.  
 So if IP keeps creating NEW connections, it should be banned forever. Don't forget to tweak values if you or your workers like reconnecting to machines. In my case, I need RDP, SSH and other services not more than 5-10 times per last 2 hours. Ordinary, I'm not reconnecting to them. I keep RDP and other sessions alive.
 15. If there was more than 15 NEW connections in 21600 seconds (6 hours), add IP to GlobalBan SET. Like 14 paragraphs: We ban >15 connections per last 6 hours, we ban them.
 16. If this IP is globally banned, we should clean xt_recent entry. Optimization again
-17. If this IP is banned either temporary or globally, we reject this connection
+17. If this IP is banned either temporary or globally, we reject this connection  
 
 The whole example should look like:
 ```bash
@@ -191,7 +194,9 @@ iptables -w 5 -A SSHPorts -m set --match-set GlobalBan src -m recent --name SSHR
 iptables -w 5 -A SSHPorts -p tcp -m set --match-set SSHPorts src -j REJECT --reject-with tcp-reset
 iptables -w 5 -A SSHPorts -m set --match-set SSHPorts src -j REJECT --reject-with icmp-port-unreachable
 
-#Generate rules (4 paragraph)
+#Generate rules (4 paragraph) and insert them at specified position. 11 line for Input. 5 line for Wanin because we inserted ban check before
+#I really don't know how to make it without hardcoding insert lines because firmware can insert more own rules and etc.
+#It's easier on clean linux distributive where firewall rules are stored by iptables-save and are always static
 for port in $RDPPorts; do
     iptables -w 5 -I INPUT 11 $iptablesPart1 --dport $port -j RDPPorts
     iptables -w 5 -I wanin 5 $iptablesPart1 --dport $port -j RDPPorts
