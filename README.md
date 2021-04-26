@@ -4,7 +4,7 @@
 ### Annoyed by specific port scanners?
 ### Annoyed by bots which floods with connections to specific services?
 
-You can try my this project.  
+You can try this project.  
 
 This was written on FreshTomato 2021.2 working on Netgear R6400. Those rules WILL need some modifications on other router firmwares or distributive because some rules are inserted on specified position.  
 Previously I've used only recent module and found it ineffective. Some IPs come again after temp ban after few hours/days.  
