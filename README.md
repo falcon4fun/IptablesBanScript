@@ -1,34 +1,35 @@
 # IptablesBanScript
 
-### Annoyed by freaking thouthands RDP, SSH and other services bruteforce?
-### Annoyed by specific portscanners?
+### Annoyed by freaking thousands RDP, SSH and other services brute force?
+### Annoyed by specific port scanners?
 ### Annoyed by bots which floods with connections to specific services?
 
+You can try my this project. 
 
+This was written on FreshTomato 2021.2 working on Netgear R6400. Those rules WILL need some modifications on other router firmwares or distributive because some rules are inserted on specified position.
+Previously I've used only recent module and found it ineffective. Some IPs come again after temp ban after few hours/days.
+The better way is to use IPSet sets to ban IPs completely. IPSet cause very small resource overhead minimizing count of iptables ban rules.
+Moreover, Brute force rate from one IP can be 20 hits per 2 hours because of many proxies/IPs available
 
-You can try my rules.
-
-This was written on FreshTomato 2021.2 working on Netgear R6400. Rules WILL need some modifications on other router firmwares or distributives because some rules are inserted on specified position.
-
-### Prerequisties:
+### Prerequisites:
 1. Iptables (tested on v1.8.7)
-2. Ipset (tested on v6.38)
+2. IPset (tested on v6.38)
 3. Loaded modules: ip_set, xt_set, ip_set_hash_ip
 4. xt_recent (or maybe ipt_recent) working
-5. Some understanding how iptables works at all (I will try to give some theory in ELI5 method bellow)
+5. Some understanding how iptables works at all (I will try to give some theory in ELI5 method below)
 
 You can check modules:
 1) if they exist on your FW by running `modprobe -l | grep "ip_\|xt_set" | sort`
 2) if they are already loaded `lsmod | grep "ip_\|xt_set" | sort`
 
 Some theory (scroll down if you understand):
-Lets imagine we have router in this case with NAT. Iptables has 3 main chains: input, forward and output.
-1. If external client sends packet to router, packet goes in Input chain
-2. If external client sends packet to somewhere inside NAT (machine behind router), packet hits in Forward chain. Forward chain works with input and output packets of NATted clients
-3. If our computer behind router sends packet, packet hits Output chain
+Let's imagine we have a router in this case with NAT. Iptables has 3 main chains: input, forward and output.
+1. If the external client sends the packet to router, the packet goes in Input chain
+2. If the external client sends a packet to somewhere inside NAT (machine behind the router), the packet hits in the Forward chain. Forward chain works with input and output packets of NATted clients
+3. If our computer behind router sends a packet, the packet hits Output chain
 Quite an easy? So, we need to work with Input and Forward chains for this task.
 
-Tomato firmware have some rules by default with some open ports
+Tomato firmware have some rules by default with some my open ports. As an example:
 ```
 iptables -L -n -v --line-numbers
 Chain INPUT (policy DROP 64 packets, 4258 bytes)
@@ -90,45 +91,45 @@ Chain wanout (1 references)
 num   pkts bytes target     prot opt in     out     source               destination
 ```
 
-Every packet is checked step by step from num 1 to num XX of corresponding chain. 
-If packet matchs any rule, it does its "Target".
-If target is another chain, it steps in that chain and go step by step from num 1 to num xx and exists if there is no accept, drop, reject target. Those "targets" does action and forgets about packet.
+Every packet is checked step by step from num #1 to num #XX of corresponding chain. 
+If the packet matches any rule, it does its "Target".
+If the target is another chain, it steps in that chain and go step by step from num #1 to num #xx and exists if there is no accept, drop, reject target. Those "targets" does action and forgets about the packet.
 
 
-We need to create some new filtering chains and redirect from Input and Forward chains to them. 
-They should be after 6 line in Input chain and before Forward 5 line or inside Wanin chain because we have rule for inbound forwarded traffic.
-We don't want to filter outbound traffic so lets filter inside Wanin chain. Alternatively you can modify my rules with "-i" parameter with interface name to filter from wan->lan
+We need to create some new filtering chains and redirect from Input and Forward chains to them. 
+They should be after 6 line in Input chain and before Forward 5 line or inside Wanin chain because we have a rule for inbound forwarded traffic.
+We don't want to filter outbound traffic so let's filter inside Wanin chain. Alternatively you can modify my rules with "-i" parameter with interface name to filter from wan->lan
 
 We have:
-1. Globally opened ssh on 22 tcp port on our router (i.e. we need to access our router from somewhere)
-2. RDP TCP/UDP ports for clients (behind the nat) on 3389 and 3389
-3. Eventlog shows many audit events with failed logon from remote machines (ID 4625 for example) who tryes to bruteforce login:pass
+1. Globally opened ssh on 22 TCP port on our router (i.e. we need to access our router from somewhere)
+2. RDP TCP/UDP ports for clients (behind the Nat) on 3389 and 3389
+3. Event log shows many audit events with failed logon from remote machines (ID 4625 for example) who tries to brute force login:pass
 4. Ssh log is full of the same
 
-In my opition, router can and should work on it.
+In my opinion, the router can and should work on it.
 Main logic of my rules:
-1. Create ipset some tables (Will call them SETs to not confuse with Iptables TABLES) with timeouts where to store timed, global and flood ban.
+1. Create IPSet some tables (Will call them SETs to not confuse with Iptables TABLES) with timeouts where to store timed, global and flood ban.
 In current example we need SSHPorts, RDPPorts, GlobalBan, FloodBan to be created.
-2. We will check if IP is inside IpSet SET. If true, we reject connection with tcp-reset
+2. We will check if IP is inside IPSet SET. If true, we reject connection with tcp-reset
 3. We need to create some chains where to jump in. Let them be with the same name: SSHPorts, RDPPorts, GlobalBan, FloodBan
-4. Now we need to check if packets is matches rule with destination port (22 or 3389 or 3399) it will go to corresponding chain. Example: we have 3389 port and RDPPorts chain.
+4. Now we need to check if packets is matches rule with destination port (22 or 3389 or 3399) it will go to corresponding chain. Example: we have 3389 port and Rapports chain.
 5. Next we will check if IP appears to be flooder one
 6. We send him to FloodBan chain
-7. FloodBan chain adds every ip to xt_recent list called "FloodRecent" with timestamp and counter
-8. Next it checks if there was more than 60 NEW connections in last 120 seconds. If True, we add that IP to FloodBan SET (ban it. WHY YOU BULLY ME U FREAKIN BEACH)
-9. If this ip is banned, we should clean xt_recent entry (optimization. Why should we store and track them?)
-10. If this ip is banned, Reject this connection
+7. FloodBan chain adds every IP to xt_recent list called "FloodRecent" with timestamp and counter
+8. Next it checks if there was more than 60 NEW connections in the last 120 seconds. If True, we add that IP to FloodBan SET (ban it. WHY YOU BULLY ME U FREAKIN BEACH)
+9. If this IP is banned, we should clean xt_recent entry (optimization. Why should we store and track them?)
+10. If this IP is banned, Reject this connection
 11. If 7-10 are false, we step out from FloodBan chain to our RDPPorts chain
-12. RDPPorts chain add every ip to xt_recent list called "RDPRecent" with timestamp and counter
-13. Next it checks if there was more than 5 NEW connections in last 60 seconds. If true, add IP to RDPPorts SET.
+12. RDPPorts chain add every IP to xt_recent list called "RDPRecent" with timestamp and counter
+13. Next it checks if there was more than 5 NEW connections in the last 60 seconds. If true, add IP to RDPPorts SET.
 Why should IP create NEW connections 5 times per minute? Maybe because Windows disconnected it?
 RDPPorts SET is a timeout one. It has 300s timeout (or any other value). IP will be removed from that SET after timeout.
-So we ban IP for 300s. But RECENT module (12 paragraph) will still count temporary banned IP and log timestamps and increment counter. Bruteforce software likes reconnecting many many many times. Any real person will not do that after service unavailable if he knows how work his timelock.
-14. Another rule: if there was more than 10 NEW connections in last 7200 seconds (2 hours), add IP to GlobalBan SET.
-So if IP keeps creating NEW connections, it should be banned forever. Don't forget to tweak values if you or your workers like reconnecting to machines. In my case, I need RDP, SSH and other services not more that 5-10 times per last 2 hours. Ordinary, I'm not reconnecting on them. I keep RDP and other sessions alive.
-15. If there was more than 15 NEW connections in 21600 seconds (6 hours), add IP to GlobalBan SET. Like 14 paragraph: We ban >15 connections per last 6 hours, we ban them.
-16. If this ip is globally banned, we should clean xt_recent entry. Optimization again
-17. If this ip is banned either temporary or globally, we reject this connection
+So we ban IP for 300s. But RECENT module (12 paragraph) will still count temporary banned IP and log timestamps and increment counter. Brute force software likes reconnecting many and many times. Any real person will not do that after service unavailable if he knows how his time lock works.
+14. Another rule: if there was more than 10 NEW connections in the last 7200 seconds (2 hours), add IP to GlobalBan SET.
+So if IP keeps creating NEW connections, it should be banned forever. Don't forget to tweak values if you or your workers like reconnecting to machines. In my case, I need RDP, SSH and other services not more than 5-10 times per last 2 hours. Ordinary, I'm not reconnecting to them. I keep RDP and other sessions alive.
+15. If there was more than 15 NEW connections in 21600 seconds (6 hours), add IP to GlobalBan SET. Like 14 paragraphs: We ban >15 connections per last 6 hours, we ban them.
+16. If this IP is globally banned, we should clean xt_recent entry. Optimization again
+17. If this IP is banned either temporary or globally, we reject this connection
 
 The whole example should look like:
 ```bash
